@@ -54,7 +54,8 @@
         canvas:active {
             outline: none;
             border: 0;
-            ie-dummy: expression(this.hideFocus=true);
+            /* Fix for IE */
+            -ms-hide-focus: true;
             -moz-outline-style: none;
         }
 
@@ -176,6 +177,13 @@
 
         var extra_params = {
             archive_location_filter: function(path) {
+                // Check if we're on GitHub Pages or similar
+                var isGitHub = window.location.hostname.includes('github.io');
+                // For GitHub Pages, you might need a different path structure
+                if (isGitHub) {
+                    return window.location.pathname + "archive" + path;
+                }
+                // For localhost, use the original path
                 return ("archive" + path + "");
             },
             engine_arguments: ["--verify-graphics-calls=false", ],
@@ -186,9 +194,11 @@
 
         Module['INITIAL_MEMORY'] = extra_params.custom_heap_size;
 
-        Module['onRuntimeInitialized'] = function() {
+        // Store the original onRuntimeInitialized function for later use
+        var originalOnRuntimeInitialized = function() {
             Module.runApp("canvas", extra_params);
         };
+        Module['onRuntimeInitialized'] = originalOnRuntimeInitialized;
 
         Module["locateFile"] = function(path, scriptDirectory) {
             // dmengine*.wasm is hardcoded in the built JS loader for WASM,
@@ -373,6 +383,19 @@
         }
     </script>
     <script id="poki-sdk-setup" type="text/javascript">
+        // Add a safety check for PokiSDK
+        if (typeof PokiSDK === 'undefined') {
+            // Define a mock PokiSDK if it's not available
+            window.PokiSDK = {
+                gameLoadingStart: function() {},
+                gameLoadingProgress: function() {},
+                gameLoadingFinished: function() {},
+                init: function() { return Promise.resolve(); },
+                displayAd: function() {},
+                destroyAd: function() {}
+            };
+        }
+        
         PokiSDK.gameLoadingStart();
         var data = {};
         var isLoadFinished = false;
@@ -385,12 +408,24 @@
                 isLoadFinished = true;
             }
         });
+
+        // Save the original function reference
+        var originalRuntimeInit = Module['onRuntimeInitialized'];
+        
+        // Override with our Poki-enabled version
         Module['onRuntimeInitialized'] = function() {
-            PokiSDK.init().then(() => {
-                Module.runApp("canvas", extra_params);
-            }).catch(() => {
-                Module.runApp("canvas", extra_params);
-            });
+            try {
+                PokiSDK.init().then(() => {
+                    // Call the original function instead of duplicating code
+                    originalRuntimeInit();
+                }).catch(() => {
+                    console.log("Poki SDK initialization failed, running game anyway");
+                    originalRuntimeInit();
+                });
+            } catch (e) {
+                console.log("Error with Poki SDK, running game anyway:", e);
+                originalRuntimeInit();
+            }
         };
     </script>
     <script type="text/javascript" src="GameAnalytics.js"></script>
